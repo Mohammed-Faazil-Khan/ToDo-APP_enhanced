@@ -7,6 +7,7 @@ from app.auth import router as auth_router
 from app.admin import router as admin_router
 from app.routes.tasks import router as tasks_router
 from app.ai import router as ai_router
+from app.routes.ai import router as ai_router
 
 app = FastAPI(
     title="To-Do Application API",

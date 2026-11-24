@@ -25,6 +25,9 @@ export default function Tasks() {
   // Smart Add (AI): turn a sentence into task fields
   const [aiText, setAiText] = useState(""); const [aiProvider] = useState<AiProvider>("gemini");
   const [aiBusy, setAiBusy] = useState(false); const [aiMsg, setAiMsg] = useState("");
+  // AI task breakdown
+  const [aiGoal, setAiGoal] = useState(""); const [breakdownBusy, setBreakdownBusy] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<{ title: string; description: string; priority: Priority }[]>([]);
 
   const load = useCallback(async () => {
     try { setError(""); setTasks(refine(await api.listTasks({ status, q, sort }), status, q, sort)); }
@@ -64,6 +67,21 @@ export default function Tasks() {
     } catch (err) { setError(err instanceof Error ? err.message : "Could not save the task."); }
   };
 
+  const askAi = async (e: FormEvent) => {
+    e.preventDefault();
+    if (aiGoal.trim().length < 3) return setError("Describe your goal in a few words first.");
+    setBreakdownBusy(true); setError(""); setAiSuggestions([]);
+    try { setAiSuggestions((await api.aiBreakdown(aiGoal.trim())).subtasks); }
+    catch (err) { setError(err instanceof Error ? err.message : "AI request failed."); }
+    finally { setBreakdownBusy(false); }
+  };
+  const addSuggestions = async () => {
+    try {
+      for (const s of aiSuggestions) await api.createTask({ title: s.title, description: s.description || null, priority: s.priority, due_date: null, status: "pending" });
+      setAiSuggestions([]); setAiGoal(""); await load();
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not add the tasks."); }
+  };
+
   const setTaskStatus = async (t: Task, s: Status) => {
     setTasks((prev) => prev.map((x) => (x.id === t.id ? { ...x, status: s } : x))); // optimistic
     try { await api.updateTask(t.id, { status: s }); } catch (e) { setError(e instanceof Error ? e.message : "Update failed."); load(); }
@@ -84,6 +102,19 @@ export default function Tasks() {
           <div><h2>Task List</h2><p>Search, filter and manage your tasks.</p></div>
           <span className="muted">{shown.length} {shown.length === 1 ? "task" : "tasks"}</span>
         </div>
+        <form className="toolbar" onSubmit={askAi}>
+          <input type="text" placeholder="✨ Describe a goal, e.g. &quot;prepare for my viva&quot;" value={aiGoal} maxLength={200}
+            onChange={(e) => setAiGoal(e.target.value)} aria-label="Goal for AI breakdown" />
+          <button className="btn btn-primary" disabled={breakdownBusy}>{breakdownBusy ? "Thinking…" : "Break down with AI"}</button>
+        </form>
+        {aiSuggestions.length > 0 && (
+          <div className="panel" style={{ margin: "12px 0" }}>
+            <h3>AI suggestions</h3>
+            <ul>{aiSuggestions.map((s, i) => <li key={i}><strong>{s.title}</strong> <span className="muted">({s.priority})</span>{s.description && <> — {s.description}</>}</li>)}</ul>
+            <button className="btn btn-primary" onClick={addSuggestions}>Add all {aiSuggestions.length} as tasks</button>{" "}
+            <button className="btn btn-secondary" onClick={() => setAiSuggestions([])}>Dismiss</button>
+          </div>
+        )}
         <div className="toolbar">
           <input type="search" placeholder="⌕ Search tasks by title..." value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search tasks" />
           <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Filter by status">

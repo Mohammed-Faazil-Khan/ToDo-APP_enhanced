@@ -1,4 +1,4 @@
-import type { AdminUser, AiParsedTask, AiPlan, AiProvider, Role, Status, Task, TaskInput } from "./types";
+import type { AdminUser, AiParsedTask, AiPlan, AiProvider, Priority, Role, Status, Task, TaskInput } from "./types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "";
 const KEY = "taskly_token";
@@ -92,6 +92,11 @@ export const api = {
     req<AiParsedTask>("/api/ai/parse-task", { method: "POST", body: JSON.stringify({ text, provider }) }),
   aiPlan: (provider?: AiProvider) =>
     req<AiPlan>("/api/ai/plan", { method: "POST", body: JSON.stringify({ provider }) }),
+  /** AI: turn a goal into suggested subtasks (NVIDIA-hosted LLM, called by the backend). */
+  aiBreakdown: (goal: string) =>
+    req<{ subtasks: { title: string; description: string; priority: Priority }[] }>("/api/ai/breakdown", {
+      method: "POST", body: JSON.stringify({ goal }),
+    }),
 
   // Admin-only (backend must return 403 for role=user)
   adminUsers: async (): Promise<AdminUser[]> =>

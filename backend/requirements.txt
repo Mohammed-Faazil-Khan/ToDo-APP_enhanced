@@ -11,3 +11,4 @@ PyJWT
 python-multipart
 email-validator
 httpx
+openai
