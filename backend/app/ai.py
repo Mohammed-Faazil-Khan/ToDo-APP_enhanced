@@ -5,10 +5,11 @@ Single endpoint, requires a logged-in user:
 
 Environment variables:
   GEMINI_API_KEY   (from https://aistudio.google.com)
-  GEMINI_MODEL     (optional, default gemini-2.0-flash)
+  GEMINI_MODEL     (optional, default gemini-2.5-flash)
 """
 
 import json
+import logging
 import os
 import re
 import time
@@ -18,6 +19,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
 from google import genai
+from google.genai import errors as genai_errors
 from pydantic import BaseModel, Field
 
 from app.dependencies import get_current_user
@@ -25,9 +27,11 @@ from app.models import User
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/ai", tags=["AI"])
 
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = "gemini-2.5-flash"
 VALID_PRIORITIES = {"low", "medium", "high"}
 
 # Simple per-user rate limit so one person cannot burn the free API quota.
@@ -47,7 +51,7 @@ def _rate_limit(user_id: int) -> None:
 
 
 def _get_client() -> genai.Client:
-    api_key = os.getenv("GEMINI_API_KEY", "")
+    api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
     if not api_key:
         raise HTTPException(status_code=503, detail="AI is not configured: set GEMINI_API_KEY.")
     return genai.Client(api_key=api_key)
@@ -56,7 +60,7 @@ def _get_client() -> genai.Client:
 def _ask(prompt: str) -> str:
     """Send one prompt to Gemini and return the raw text of the answer."""
     client = _get_client()
-    model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+    model = (os.getenv("GEMINI_MODEL") or "").strip() or DEFAULT_MODEL
     try:
         response = client.models.generate_content(
             model=model,
@@ -64,11 +68,22 @@ def _ask(prompt: str) -> str:
             config=genai.types.GenerateContentConfig(
                 temperature=0.3,
                 max_output_tokens=700,
+                response_mime_type="application/json",
             ),
         )
         return response.text or ""
+    except genai_errors.APIError as exc:
+        logger.error("Gemini APIError (status=%s, model=%s): %s", exc.code, model, exc.message)
+        if exc.code == 429:
+            raise HTTPException(status_code=429, detail="Gemini API quota or rate limit exceeded. Try again shortly.")
+        if exc.code in (400, 401, 403):
+            raise HTTPException(status_code=502, detail=f"Gemini API rejected the request ({exc.code}): check GEMINI_API_KEY.")
+        if exc.code == 404:
+            raise HTTPException(status_code=502, detail=f"Gemini model '{model}' was not found. Check GEMINI_MODEL.")
+        raise HTTPException(status_code=502, detail=f"Gemini API error ({exc.code}): {exc.message}")
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"The AI service is unavailable right now. Please try again.")
+        logger.exception("Unexpected error calling Gemini (model=%s): %s", model, exc)
+        raise HTTPException(status_code=502, detail="The AI service is unavailable right now. Please try again.")
 
 
 def _extract_json(text: str) -> dict:
