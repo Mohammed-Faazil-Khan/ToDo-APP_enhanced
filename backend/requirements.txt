@@ -10,5 +10,4 @@ uvicorn
 PyJWT
 python-multipart
 email-validator
-httpx
-openai
+google-genai

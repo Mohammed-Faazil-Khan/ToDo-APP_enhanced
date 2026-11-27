@@ -12,7 +12,3 @@ export interface AdminUser {
   id: number; name: string; email: string; role: Role; created_at: string;
   pending: number; in_progress: number; completed: number; total: number;
 }
-
-export type AiProvider = "gemini" | "grok";
-export interface AiParsedTask { title: string; description: string | null; priority: Priority; due_date: string | null; provider: AiProvider; }
-export interface AiPlan { summary: string; plan: { task_id: number; title: string; reason: string }[]; provider: AiProvider; }

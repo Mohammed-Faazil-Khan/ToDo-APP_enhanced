@@ -1,4 +1,4 @@
-import type { AdminUser, AiParsedTask, AiPlan, AiProvider, Priority, Role, Status, Task, TaskInput } from "./types";
+import type { AdminUser, Priority, Role, Status, Task, TaskInput } from "./types";
 
 const BASE = import.meta.env.VITE_API_URL ?? "";
 const KEY = "taskly_token";
@@ -87,12 +87,7 @@ export const api = {
     fromApiTask(await req(`/api/tasks/${id}`, { method: UPDATE_METHOD, body: JSON.stringify(toApiBody(t)) })),
   deleteTask: (id: number) => req<void>(`/api/tasks/${id}`, { method: "DELETE" }),
 
-  // AI features (Gemini / Grok). The API keys live only on the backend.
-  aiParseTask: (text: string, provider?: AiProvider) =>
-    req<AiParsedTask>("/api/ai/parse-task", { method: "POST", body: JSON.stringify({ text, provider }) }),
-  aiPlan: (provider?: AiProvider) =>
-    req<AiPlan>("/api/ai/plan", { method: "POST", body: JSON.stringify({ provider }) }),
-  /** AI: turn a goal into suggested subtasks (NVIDIA-hosted LLM, called by the backend). */
+  // AI: turn a goal into suggested subtasks (Gemini, called by the backend).
   aiBreakdown: (goal: string) =>
     req<{ subtasks: { title: string; description: string; priority: Priority }[] }>("/api/ai/breakdown", {
       method: "POST", body: JSON.stringify({ goal }),

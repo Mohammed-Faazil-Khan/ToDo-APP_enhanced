@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { STATUS_LABEL, TaskRow } from "../components";
-import type { AiProvider, Priority, Status, Task } from "../types";
+import type { Priority, Status, Task } from "../types";
 
 const PRI = { high: 0, medium: 1, low: 2 };
 /** The backend may ignore status / q / sort, so apply them here too (harmless if it already did). */
@@ -22,9 +22,6 @@ export default function Tasks() {
   const [loading, setLoading] = useState(true); const [error, setError] = useState("");
   const [form, setForm] = useState(blank); const [editId, setEditId] = useState<number | null>(null); const [showForm, setShowForm] = useState(false);
   const [params, setParams] = useSearchParams();
-  // Smart Add (AI): turn a sentence into task fields
-  const [aiText, setAiText] = useState(""); const [aiProvider] = useState<AiProvider>("gemini");
-  const [aiBusy, setAiBusy] = useState(false); const [aiMsg, setAiMsg] = useState("");
   // AI task breakdown
   const [aiGoal, setAiGoal] = useState(""); const [breakdownBusy, setBreakdownBusy] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<{ title: string; description: string; priority: Priority }[]>([]);
@@ -37,24 +34,13 @@ export default function Tasks() {
 
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]); // debounce search
 
-  const openNew = useCallback(() => { setForm(blank); setEditId(null); setAiText(""); setAiMsg(""); setShowForm(true); }, []);
+  const openNew = useCallback(() => { setForm(blank); setEditId(null); setShowForm(true); }, []);
   // "Add a Task" / "New Task" buttons elsewhere link here with ?new=1
   useEffect(() => { if (params.get("new")) { openNew(); setParams({}, { replace: true }); } }, [params, openNew, setParams]);
 
   const openEdit = (t: Task) => {
     setForm({ title: t.title, description: t.description ?? "", priority: t.priority, due_date: t.due_date ?? "", status: t.status });
     setEditId(t.id); setShowForm(true);
-  };
-
-  const smartFill = async () => {
-    if (aiText.trim().length < 3) return setAiMsg("Type a short sentence first, e.g. “submit report by Friday, urgent”.");
-    setAiBusy(true); setAiMsg("");
-    try {
-      const r = await api.aiParseTask(aiText.trim(), aiProvider);
-      setForm((f) => ({ ...f, title: r.title, description: r.description ?? "", priority: r.priority, due_date: r.due_date ?? "" }));
-      setAiMsg("Filled in by AI. Please check the details, then save.");
-    } catch (e) { setAiMsg(e instanceof Error ? e.message : "AI request failed."); }
-    finally { setAiBusy(false); }
   };
 
   const save = async (e: FormEvent) => {
@@ -154,17 +140,6 @@ export default function Tasks() {
             </div>
             <form onSubmit={save}>
               <div className="modal-body"><div className="modal-grid">
-                {!editId && (
-                  <div className="field wide ai-box">
-                    <label htmlFor="ai-text">✨ Smart Add <span className="muted">(optional)</span></label>
-                    <textarea id="ai-text" maxLength={500} placeholder="Describe it in your own words, e.g. “Submit the report by Friday, it’s urgent”" value={aiText} onChange={(e) => setAiText(e.target.value)} />
-                    <div className="ai-row">
-                      <span className="ai-chip">Gemini</span>
-                      <button type="button" className="btn btn-secondary" onClick={smartFill} disabled={aiBusy}>{aiBusy ? "Thinking…" : "Fill with AI"}</button>
-                    </div>
-                    {aiMsg && <p className="ai-msg" role="status">{aiMsg}</p>}
-                  </div>
-                )}
                 <div className="field wide"><label htmlFor="tt">Task Title *</label><input id="tt" autoFocus required maxLength={120} placeholder="e.g. Complete project report" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div>
                 <div className="field wide"><label htmlFor="td">Description</label><textarea id="td" maxLength={500} placeholder="Add a few details..." value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
                 <div className="field"><label htmlFor="tp">Priority</label><select id="tp" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as Priority })}><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select></div>
