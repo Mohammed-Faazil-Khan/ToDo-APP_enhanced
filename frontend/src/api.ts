@@ -92,6 +92,9 @@ export const api = {
     req<{ subtasks: { title: string; description: string; priority: Priority }[] }>("/api/ai/breakdown", {
       method: "POST", body: JSON.stringify({ goal }),
     }),
+  // AI: suggest the order to do the user's open tasks ("Plan my day").
+  aiPlan: () =>
+    req<{ summary: string; plan: { task_id: number; title: string; reason: string }[] }>("/api/ai/plan", { method: "POST", body: "{}" }),
 
   // Admin-only (backend must return 403 for role=user)
   adminUsers: async (): Promise<AdminUser[]> =>
