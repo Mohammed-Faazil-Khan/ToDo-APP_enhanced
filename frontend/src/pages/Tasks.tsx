@@ -25,6 +25,9 @@ export default function Tasks() {
   // AI task breakdown
   const [aiGoal, setAiGoal] = useState(""); const [breakdownBusy, setBreakdownBusy] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<{ title: string; description: string; priority: Priority }[]>([]);
+  // AI "Plan my day"
+  const [planBusy, setPlanBusy] = useState(false);
+  const [plan, setPlan] = useState<{ summary: string; plan: { task_id: number; title: string; reason: string }[] } | null>(null);
 
   const load = useCallback(async () => {
     try { setError(""); setTasks(refine(await api.listTasks({ status, q, sort }), status, q, sort)); }
@@ -61,6 +64,12 @@ export default function Tasks() {
     catch (err) { setError(err instanceof Error ? err.message : "AI request failed."); }
     finally { setBreakdownBusy(false); }
   };
+  const planMyDay = async () => {
+    setPlanBusy(true); setError(""); setPlan(null);
+    try { setPlan(await api.aiPlan()); }
+    catch (err) { setError(err instanceof Error ? err.message : "AI request failed."); }
+    finally { setPlanBusy(false); }
+  };
   const addSuggestions = async () => {
     try {
       for (const s of aiSuggestions) await api.createTask({ title: s.title, description: s.description || null, priority: s.priority, due_date: null, status: "pending" });
@@ -93,6 +102,17 @@ export default function Tasks() {
             onChange={(e) => setAiGoal(e.target.value)} aria-label="Goal for AI breakdown" />
           <button className="btn btn-primary" disabled={breakdownBusy}>{breakdownBusy ? "Thinking…" : "Break down with AI"}</button>
         </form>
+        <div style={{ margin: "8px 0" }}>
+          <button type="button" className="btn btn-secondary" onClick={planMyDay} disabled={planBusy}>{planBusy ? "Planning…" : "✨ Plan my day"}</button>
+        </div>
+        {plan && (
+          <div className="panel" style={{ margin: "12px 0" }}>
+            <h3>Your plan for today</h3>
+            <p>{plan.summary}</p>
+            <ol className="ai-plan">{plan.plan.map((p) => <li key={p.task_id}><strong>{p.title}</strong> <span className="muted">— {p.reason}</span></li>)}</ol>
+            <button className="btn btn-secondary" onClick={() => setPlan(null)}>Dismiss</button>
+          </div>
+        )}
         {aiSuggestions.length > 0 && (
           <div className="panel" style={{ margin: "12px 0" }}>
             <h3>AI suggestions</h3>
