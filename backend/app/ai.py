@@ -5,7 +5,7 @@ Single endpoint, requires a logged-in user:
 
 Environment variables:
   GEMINI_API_KEY   (from https://aistudio.google.com)
-  GEMINI_MODEL     (optional, default gemini-2.5-flash)
+  GEMINI_MODEL     (optional, default gemini-3.8-flash; falls back through lighter models on spikes)
 """
 
 import json
@@ -31,7 +31,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ai", tags=["AI"])
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
+FALLBACK_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-4-hydrogen",
+]
+RETRYABLE_CODES = {404, 429, 500, 502, 503, 504}
 VALID_PRIORITIES = {"low", "medium", "high"}
 
 # Simple per-user rate limit so one person cannot burn the free API quota.
@@ -57,33 +65,67 @@ def _get_client() -> genai.Client:
     return genai.Client(api_key=api_key)
 
 
+def _model_sequence() -> list[str]:
+    """Return ordered, deduplicated Gemini models starting with GEMINI_MODEL if configured."""
+    primary = (os.getenv("GEMINI_MODEL") or "").strip() or DEFAULT_MODEL
+    return list(dict.fromkeys([primary, *FALLBACK_MODELS]))
+
+
 def _ask(prompt: str) -> str:
-    """Send one prompt to Gemini and return the raw text of the answer."""
+    """Send one prompt to Gemini, falling back across models on spikes or unavailability."""
     client = _get_client()
-    model = (os.getenv("GEMINI_MODEL") or "").strip() or DEFAULT_MODEL
-    try:
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=genai.types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=700,
-                response_mime_type="application/json",
-            ),
-        )
-        return response.text or ""
-    except genai_errors.APIError as exc:
-        logger.error("Gemini APIError (status=%s, model=%s): %s", exc.code, model, exc.message)
-        if exc.code == 429:
-            raise HTTPException(status_code=429, detail="Gemini API quota or rate limit exceeded. Try again shortly.")
-        if exc.code in (400, 401, 403):
-            raise HTTPException(status_code=502, detail=f"Gemini API rejected the request ({exc.code}): check GEMINI_API_KEY.")
-        if exc.code == 404:
-            raise HTTPException(status_code=502, detail=f"Gemini model '{model}' was not found. Check GEMINI_MODEL.")
-        raise HTTPException(status_code=502, detail=f"Gemini API error ({exc.code}): {exc.message}")
-    except Exception as exc:
-        logger.exception("Unexpected error calling Gemini (model=%s): %s", model, exc)
-        raise HTTPException(status_code=502, detail="The AI service is unavailable right now. Please try again.")
+    models = _model_sequence()
+    last_error: HTTPException | None = None
+
+    for idx, model in enumerate(models):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
+                    temperature=0.3,
+                    max_output_tokens=700,
+                    response_mime_type="application/json",
+                ),
+            )
+            text = response.text or ""
+            if text.strip():
+                return text
+            logger.warning("Gemini model '%s' returned empty text; trying next fallback.", model)
+            last_error = HTTPException(status_code=502, detail="The AI service returned an empty answer.")
+        except genai_errors.APIError as exc:
+            logger.warning("Gemini APIError (status=%s, model=%s): %s", exc.code, model, exc.message)
+            if exc.code in (401, 403) or (exc.code == 400 and "api key" in str(exc.message).lower()):
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Gemini API rejected the key ({exc.code}): check GEMINI_API_KEY.",
+                )
+            if exc.code in RETRYABLE_CODES:
+                if exc.code == 429:
+                    last_error = HTTPException(
+                        status_code=429,
+                        detail="Gemini API quota or rate limit exceeded across all fallback models. Try again shortly.",
+                    )
+                elif exc.code == 404:
+                    last_error = HTTPException(
+                        status_code=502,
+                        detail=f"Gemini model '{model}' was not found. Check GEMINI_MODEL.",
+                    )
+                else:
+                    last_error = HTTPException(
+                        status_code=502,
+                        detail=f"Gemini API is temporarily overloaded ({exc.code}). Please try again shortly.",
+                    )
+            else:
+                raise HTTPException(status_code=502, detail=f"Gemini API error ({exc.code}): {exc.message}")
+        except Exception as exc:
+            logger.warning("Unexpected error calling Gemini (model=%s): %s", model, exc)
+            last_error = HTTPException(status_code=502, detail="The AI service is unavailable right now. Please try again.")
+
+        if idx < len(models) - 1:
+            time.sleep(0.4)
+
+    raise last_error or HTTPException(status_code=502, detail="The AI service is unavailable right now. Please try again.")
 
 
 def _extract_json(text: str) -> dict:
